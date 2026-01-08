@@ -9,12 +9,12 @@
 - [Configuration](#configuration)
 - [API Documentation](#api-documentation)
 - [Usage](#usage)
-- [GraphQL Schema](#graphql-schema)
 - [Validation and Error Handling](#validation-and-error-handling)
 - [AOP Implementation](#aop-implementation)
 - [Performance Analysis](#performance-analysis)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
+- [Running with Docker](#running-with-docker)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -53,8 +53,9 @@ This Smart E-Commerce System is a comprehensive web-based Spring Boot applicatio
 | Spring GraphQL | 3.x | GraphQL support |
 | Springdoc OpenAPI | 2.x | API documentation |
 | Hibernate | 6.x | ORM framework |
-| Database | Relational | Persistent storage |
-| Maven/Gradle | Latest | Build tool |
+| Database | H2/PostgreSQL | Persistent storage |
+| Maven | 3.9+ | Build tool |
+| Docker | Latest | Containerization |
 
 ## Architecture
 
@@ -71,6 +72,22 @@ This Smart E-Commerce System is a comprehensive web-based Spring Boot applicatio
 └─────────────────┘
 ```
 
+### Modular Architecture
+```
+modules/
+├── auth/
+├── user/
+├── product/
+├── category/
+├── cart/
+├── order/
+├── payment/
+├── inventory/
+├── recommendation/
+├── notification/
+└── analytics/
+```
+
 ### Design Patterns
 - **Dependency Injection**: Constructor-based injection for better testability
 - **Layered Architecture**: Separation of concerns between presentation, business, and data layers
@@ -83,7 +100,7 @@ This Smart E-Commerce System is a comprehensive web-based Spring Boot applicatio
 ### Prerequisites
 - Java 21 or higher
 - Maven 3.6+ or Gradle 7+
-- Relational database (PostgreSQL, MySQL, etc.)
+- Docker (optional, for containerized deployment)
 
 ### Steps
 1. Clone the repository:
@@ -92,22 +109,14 @@ git clone <repository-url>
 cd smart-ecommerce-system
 ```
 
-2. Set up the database according to the schema from Module 4
-
-3. Configure environment variables in `application.properties` or `application.yml`
-
-4. Build the project:
+2. Build the project:
 ```bash
 mvn clean install
-# or
-./gradlew build
 ```
 
-5. Run the application:
+3. Run the application:
 ```bash
 mvn spring-boot:run
-# or
-./gradlew bootRun
 ```
 
 ## Configuration
@@ -115,8 +124,8 @@ mvn spring-boot:run
 ### Environment Profiles
 The application supports multiple environments:
 
-- **Development**: `dev` profile
-- **Testing**: `test` profile  
+- **Development**: `dev` profile (default)
+- **Test**: `test` profile
 - **Production**: `prod` profile
 
 ### Configuration Files
@@ -127,31 +136,46 @@ The application supports multiple environments:
 
 ### Key Configuration Properties
 ```yaml
-# Database Configuration
 spring:
+  application:
+    name: smart-ecommerce
+  profiles:
+    active: dev
   datasource:
-    url: jdbc:postgresql://localhost:5432/ecommerce_db
-    username: your_username
-    password: your_password
-    driver-class-name: org.postgresql.Driver
-  
+    url: jdbc:h2:mem:ecommerce_db
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
   jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
     show-sql: true
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+  graphql:
+    graphiql:
+      enabled: true
+    path: /graphql
 
-# Server Configuration
 server:
   port: 8080
 
-# Logging Configuration
 logging:
   level:
-    com.yourpackage: DEBUG
+    com.ecommerce.ecommerceapp: DEBUG
     org.springframework: INFO
+    org.springframework.security: INFO
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
 ```
 
 ## API Documentation
@@ -240,62 +264,6 @@ mutation CreateProduct($input: ProductInput!) {
 }
 ```
 
-## GraphQL Schema
-
-### Types
-```graphql
-type User {
-  id: ID!
-  firstName: String!
-  lastName: String!
-  email: String!
-  role: String!
-  createdAt: String!
-  updatedAt: String!
-}
-
-type Product {
-  id: ID!
-  name: String!
-  description: String
-  price: Float!
-  stock: Int!
-  category: Category!
-  createdAt: String!
-  updatedAt: String!
-}
-
-type Category {
-  id: ID!
-  name: String!
-  description: String
-  parentId: ID
-  children: [Category!]!
-  products: [Product!]!
-  createdAt: String!
-  updatedAt: String!
-}
-```
-
-### Queries
-- `users(page: Int, size: Int, sortBy: String, order: SortOrder): UserPage`
-- `user(id: ID!): User`
-- `products(page: Int, size: Int, categoryId: ID, minPrice: Float, maxPrice: Float): ProductPage`
-- `product(id: ID!): Product`
-- `categories: [Category!]!`
-- `category(id: ID!): Category`
-
-### Mutations
-- `createUser(input: UserInput!): User!`
-- `updateUser(id: ID!, input: UserInput!): User!`
-- `deleteUser(id: ID!): Boolean!`
-- `createProduct(input: ProductInput!): Product!`
-- `updateProduct(id: ID!, input: ProductInput!): Product!`
-- `deleteProduct(id: ID!): Boolean!`
-- `createCategory(input: CategoryInput!): Category!`
-- `updateCategory(id: ID!, input: CategoryInput!): Category!`
-- `deleteCategory(id: ID!): Boolean!`
-
 ## Validation and Error Handling
 
 ### Validation Rules
@@ -314,12 +282,9 @@ type Category {
   "error": "Bad Request",
   "message": "Validation failed",
   "path": "/api/users",
-  "details": [
-    {
-      "field": "email",
-      "message": "Email format is invalid"
-    }
-  ]
+  "fieldErrors": {
+    "email": "Email format is invalid"
+  }
 }
 ```
 
@@ -353,18 +318,39 @@ type Category {
 @Component
 public class LoggingAspect {
     
-    @Around("@annotation(LogExecutionTime)")
-    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
+    @Around("within(com.ecommerce.ecommerceapp.modules..*)")
+    public Object logAround(ProceedingJoinPoint joinPoint) throws Throwable {
         long startTime = System.currentTimeMillis();
-        Object result = joinPoint.proceed();
-        long duration = System.currentTimeMillis() - startTime;
         
-        if (duration > 1000) { // Log if execution takes more than 1 second
-            log.warn("Method {} took {} ms to execute", 
-                     joinPoint.getSignature().getName(), duration);
+        logger.info("Entering method: {} with arguments: {}", 
+                   joinPoint.getSignature().getDeclaringTypeName() + "." + joinPoint.getSignature().getName(),
+                   joinPoint.getArgs());
+
+        try {
+            Object result = joinPoint.proceed();
+            
+            long endTime = System.currentTimeMillis();
+            long duration = endTime - startTime;
+            
+            logger.info("Exiting method: {} with result: {}. Execution time: {} ms", 
+                       joinPoint.getSignature().getDeclaringTypeName() + "." + joinPoint.getSignature().getName(),
+                       result, duration);
+            
+            if (duration > 1000) { // Log if execution takes more than 1 second
+                logger.warn("Method {} took {} ms to execute", 
+                           joinPoint.getSignature().getName(), duration);
+            }
+            
+            return result;
+        } catch (Exception e) {
+            long endTime = System.currentTimeMillis();
+            long duration = endTime - startTime;
+            
+            logger.error("Exception in method: {} after {} ms. Exception: {}", 
+                        joinPoint.getSignature().getDeclaringTypeName() + "." + joinPoint.getSignature().getName(),
+                        duration, e.getMessage());
+            throw e;
         }
-        
-        return result;
     }
 }
 ```
@@ -416,31 +402,54 @@ public class LoggingAspect {
 ## Project Structure
 
 ```
-src/
-├── main/
-│   ├── java/
-│   │   └── com/
-│   │       └── ecommerce/
-│   │           ├── SmartEcommerceApplication.java
-│   │           ├── config/           # Configuration classes
-│   │           ├── controller/       # REST and GraphQL controllers
-│   │           ├── service/          # Business logic layer
-│   │           ├── repository/       # Data access layer
-│   │           ├── model/            # Entity and DTO classes
-│   │           ├── aspect/           # AOP aspects
-│   │           ├── exception/        # Custom exceptions
-│   │           └── validator/        # Custom validators
-│   └── resources/
-│       ├── application.yml          # Main configuration
-│       ├── application-dev.yml      # Development config
-│       ├── application-prod.yml     # Production config
-│       └── static/                  # Static resources
-└── test/
-    └── java/
-        └── com/
-            └── ecommerce/
-                └── tests/           # Test classes
+smart-ecommerce/
+│
+├── docker/
+│   ├── Dockerfile
+│   └── docker-compose.yml
+│
+├── docs/
+│   ├── architecture.md
+│   ├── api-spec.yaml
+│   └── database-design.md
+│
+├── src/
+│   ├── main/
+│   │   ├── java/com/company/ecommerce/
+│   │   │   ├── EcommerceApplication.java
+│   │   │   │
+│   │   │   ├── config/
+│   │   │   ├── security/
+│   │   │   ├── common/
+│   │   │   ├── modules/
+│   │   │   └── integration/
+│   │   │
+│   │   └── resources/
+│   │       ├── application.yml
+│   │       ├── db/migration/
+│   │       └── templates/
+│   │
+│   └── test/
+│       └── java/com/company/ecommerce/
+│
+├── pom.xml
+└── README.md
 ```
+
+## Running with Docker
+
+### Build and Run
+```bash
+# Build the application
+mvn clean install
+
+# Build and run with Docker Compose
+docker-compose -f docker/docker-compose.yml up --build
+```
+
+### Docker Services
+- **app**: Spring Boot application running on port 8080
+- **db**: PostgreSQL database running on port 5432
 
 ## Contributing
 
